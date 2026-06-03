@@ -1,0 +1,25 @@
+services:
+  fuchsia-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        USERNAME: ${DEV_USER:-fuchsia}
+        USER_UID: ${DEV_UID:-1000}
+        USER_GID: ${DEV_GID:-1000}
+    image: fuchsia-dev:local
+    container_name: fuchsia-dev
+    hostname: fuchsia-dev
+    init: true
+    stdin_open: true
+    tty: true
+    environment:
+      USERNAME: ${DEV_USER:-fuchsia}
+      DEV_PASSWORD: "${DEV_PASSWORD:-}"
+      CCACHE_DIR: /home/${DEV_USER:-fuchsia}/.cache/ccache
+    ports:
+      - "127.0.0.1:${SSH_PORT:-2222}:22"
+    volumes:
+      - ./fuchsia-home:/home/${DEV_USER:-fuchsia}
+      - ./ssh:/ssh:ro
+    working_dir: /home/${DEV_USER:-fuchsia}

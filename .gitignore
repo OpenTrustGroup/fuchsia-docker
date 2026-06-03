@@ -1,0 +1,5 @@
+keys/
+ssh/authorized_keys
+fuchsia-src/
+fuchsia-ccache/
+fuchsia-home/
