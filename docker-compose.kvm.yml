@@ -1,0 +1,4 @@
+services:
+  fuchsia-dev:
+    devices:
+      - /dev/kvm:/dev/kvm

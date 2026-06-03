@@ -10,6 +10,8 @@ SSH is bound to localhost only and uses public-key authentication by default.
 
 - `Dockerfile`: Builds the Ubuntu-based Fuchsia development image.
 - `docker-compose.yml`: Starts the development container and exposes SSH.
+- `docker-compose.kvm.yml`: Optional Compose override that passes `/dev/kvm`
+  into the container.
 - `docker-entrypoint.sh`: Installs SSH authorized keys at container startup.
 - `ssh/authorized_keys`: Local public keys mounted into the container. This file
   is ignored by Git.
@@ -94,6 +96,17 @@ X11 forwarding with:
 ```bash
 ./fuchsia-ssh --trusted-x11 firefox
 ```
+
+Enable KVM-backed emulator acceleration on hosts that expose `/dev/kvm`:
+
+```bash
+test -e /dev/kvm
+docker compose -f docker-compose.yml -f docker-compose.kvm.yml up -d --build --force-recreate
+```
+
+When `/dev/kvm` is mounted, the entrypoint adds the container user to a group
+matching the device's group ID before starting SSH. Open a new SSH session after
+recreating the container so the login has the updated group membership.
 
 Run a command over SSH:
 

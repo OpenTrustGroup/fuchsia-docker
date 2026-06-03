@@ -5,8 +5,31 @@ USERNAME="${USERNAME:-fuchsia}"
 DEV_PASSWORD="${DEV_PASSWORD:-fuchsia}"
 HOME_DIR="/home/${USERNAME}"
 
+configure_kvm_group() {
+    if [[ ! -e /dev/kvm ]]; then
+        return 0
+    fi
+
+    local kvm_gid
+    local kvm_group
+    kvm_gid="$(stat -c '%g' /dev/kvm)"
+    kvm_group="$(getent group "${kvm_gid}" | cut -d: -f1 || true)"
+
+    if [[ -z "${kvm_group}" ]]; then
+        kvm_group="kvm"
+        if getent group "${kvm_group}" > /dev/null; then
+            groupmod --gid "${kvm_gid}" "${kvm_group}"
+        else
+            groupadd --gid "${kvm_gid}" "${kvm_group}"
+        fi
+    fi
+
+    usermod -aG "${kvm_group}" "${USERNAME}"
+}
+
 mkdir -p /run/sshd "${HOME_DIR}/.ssh" "${HOME_DIR}/fuchsia" "${HOME_DIR}/.cache/ccache"
 chmod 700 "${HOME_DIR}/.ssh"
+configure_kvm_group
 
 for file in .bashrc .profile .bash_logout; do
     if [[ ! -e "${HOME_DIR}/${file}" && -e "/etc/skel/${file}" ]]; then
