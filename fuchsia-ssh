@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+SSH_HOST="${SSH_HOST:-127.0.0.1}"
+SSH_PORT="${SSH_PORT:-2222}"
+SSH_USER="${DEV_USER:-${SSH_USER:-fuchsia}}"
+SSH_KEY="${SSH_KEY:-${SCRIPT_DIR}/keys/fuchsia_dev_ed25519}"
+KNOWN_HOSTS="${KNOWN_HOSTS:-/tmp/fuchsia-dev-known-hosts}"
+SSH_X11="${SSH_X11:-}"
+SSH_TRUSTED_X11="${SSH_TRUSTED_X11:-}"
+
+usage() {
+    cat <<EOF
+Usage:
+  $(basename "$0") [options] [--] [command...]
+
+Open an interactive SSH session to the Fuchsia development container. If a
+command is provided, execute it in the container instead.
+
+Options:
+  -X, --x11           Enable untrusted X11 forwarding.
+  -Y, --trusted-x11   Enable trusted X11 forwarding.
+      --no-x11        Disable X11 forwarding set through the environment.
+  -h, --help          Show this help.
+
+Environment overrides:
+  SSH_HOST           Host to connect to. Default: 127.0.0.1
+  SSH_PORT           SSH port. Default: 2222
+  SSH_USER           SSH user. Default: fuchsia
+  DEV_USER           Alternative way to set the SSH user.
+  SSH_KEY            Private key path. Default: keys/fuchsia_dev_ed25519
+  KNOWN_HOSTS        Known-hosts file. Default: /tmp/fuchsia-dev-known-hosts
+  SSH_X11            Enable untrusted X11 forwarding when set to 1, true, yes, or on.
+  SSH_TRUSTED_X11    Enable trusted X11 forwarding when set to 1, true, yes, or on.
+
+Examples:
+  $(basename "$0")
+  $(basename "$0") --x11
+  $(basename "$0") --trusted-x11 xclock
+  $(basename "$0") pwd
+  $(basename "$0") 'cd ~/fuchsia && git status --short --branch'
+EOF
+}
+
+is_truthy() {
+    case "${1,,}" in
+        1 | true | yes | on)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+x11_mode=""
+if is_truthy "${SSH_TRUSTED_X11}"; then
+    x11_mode="trusted"
+elif is_truthy "${SSH_X11}"; then
+    x11_mode="untrusted"
+fi
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        -X | --x11)
+            x11_mode="untrusted"
+            shift
+            ;;
+        -Y | --trusted-x11)
+            x11_mode="trusted"
+            shift
+            ;;
+        --no-x11)
+            x11_mode=""
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+ssh_args=(
+    -i "${SSH_KEY}"
+    -p "${SSH_PORT}"
+    -o StrictHostKeyChecking=no
+    -o "UserKnownHostsFile=${KNOWN_HOSTS}"
+)
+
+case "${x11_mode}" in
+    untrusted)
+        ssh_args+=(-X)
+        ;;
+    trusted)
+        ssh_args+=(-Y)
+        ;;
+esac
+
+ssh_args+=("${SSH_USER}@${SSH_HOST}")
+
+if [[ $# -eq 0 ]]; then
+    exec ssh "${ssh_args[@]}"
+fi
+
+exec ssh "${ssh_args[@]}" "$*"
