@@ -8,8 +8,15 @@ ARG USER_UID=1000
 ARG USER_GID=1000
 ARG NODE_MAJOR=22
 
+# Base modern dev toolchain plus the Fuchsia-2018 host build prerequisites
+# (autoconf, golang, libglib2.0-dev, libsdl1.2-dev, libtool, lz4, python2, texinfo
+# -- from the OTGOS build.md validated-host list) so this image can also build the
+# 2018 tree. libsdl-dev is virtual, hence libsdl1.2-dev; python2 (2.7.18) is
+# required by the 2018 build helpers and is kept alongside, not aliased over,
+# python3. lz4 supersedes the doc's retired liblz4-tool.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        autoconf \
         bash-completion \
         build-essential \
         ca-certificates \
@@ -21,21 +28,28 @@ RUN apt-get update \
         g++ \
         git \
         gnupg \
+        golang \
         iproute2 \
         iputils-ping \
         less \
+        libglib2.0-dev \
+        libsdl1.2-dev \
+        libtool \
         locales \
         lsb-release \
+        lz4 \
         make \
         nano \
         ninja-build \
         openssh-client \
         openssh-server \
         pkg-config \
+        python2 \
         python3 \
         python3-venv \
         rsync \
         sudo \
+        texinfo \
         tmux \
         unzip \
         vim \
