@@ -12,8 +12,7 @@ ARG NODE_MAJOR=22
 # (autoconf, golang, libglib2.0-dev, libsdl1.2-dev, libtool, lz4, python2, texinfo
 # -- from the OTGOS build.md validated-host list) so this image can also build the
 # 2018 tree. libsdl-dev is virtual, hence libsdl1.2-dev; python2 (2.7.18) is
-# required by the 2018 build helpers and is kept alongside, not aliased over,
-# python3. lz4 supersedes the doc's retired liblz4-tool.
+# required by the 2018 build helpers. lz4 supersedes the doc's retired liblz4-tool.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         autoconf \
@@ -58,6 +57,15 @@ RUN apt-get update \
         zip \
     && locale-gen en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
+
+# /usr/bin/python -> python2 for the Fuchsia-2018 build. The 2018 tree hardcodes
+# `#!/usr/bin/python` (e.g. third_party/yasm/run_yasm.py) and `#!/usr/bin/env
+# python`, both of which mean python2 on the 2018 host; Ubuntu 22.04 ships no bare
+# `python`, so gn/ninja build actions otherwise fail with "python: not found".
+# Ubuntu provides no /usr/bin/python by default, so this shadows nothing -- modern
+# tooling calls python3 explicitly. This gives the shared dev image the same 2018
+# build capability the CI agent has.
+RUN ln -sf /usr/bin/python2 /usr/bin/python
 
 RUN mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://packages.mozilla.org/apt/repo-signing-key.gpg -o /etc/apt/keyrings/packages.mozilla.org.asc \
