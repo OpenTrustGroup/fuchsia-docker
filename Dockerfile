@@ -104,6 +104,14 @@ RUN sed -ri 's/^#?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh
     && if ! grep -qE '^X11UseLocalhost yes$' /etc/ssh/sshd_config; then printf '\nX11UseLocalhost yes\n' >> /etc/ssh/sshd_config; fi \
     && printf '\nAllowUsers %s\n' "${USERNAME}" >> /etc/ssh/sshd_config
 
+# Drop the host keys the openssh-server package generates at install time.
+# Leaving them in the image would give every container built from it -- and
+# everyone who pulls the published image -- identical private host keys, which
+# makes the SSH host identity worthless and trivially impersonated. The
+# entrypoint calls `ssh-keygen -A`, which mints a fresh set per container on
+# first start.
+RUN rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
+
 ENV LANG=en_US.UTF-8 \
     LC_ALL=en_US.UTF-8 \
     USER="${USERNAME}" \
