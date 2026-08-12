@@ -1,0 +1,270 @@
+name: Build, Test, and Push Docker Image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Never let two runs of the same ref publish images concurrently.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  TEST_IMAGE: fuchsia-dev:ci
+  SSH_PORT: "2222"
+
+jobs:
+  docker:
+    name: Build, test, and push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # GHCR rejects uppercase path segments, and this repository is expected to
+      # move to an organization. Deriving the name here keeps the workflow
+      # correct after a transfer without further edits.
+      - name: Compute lowercase image name
+        id: image
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Validate Compose files
+        run: |
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.kvm.yml config --quiet
+
+      # Build once into the local daemon so the tests below run against the
+      # exact image that is later published. The push step reuses this cache.
+      - name: Build image for testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ${{ env.TEST_IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=min
+
+      - name: Verify toolchain is present
+        run: |
+          docker run --rm --entrypoint /bin/bash "$TEST_IMAGE" -c '
+            set -euo pipefail
+            # The libtool package ships libtoolize; the "libtool" binary itself
+            # lives in libtool-bin, which this image does not install.
+            for cmd in gcc g++ clang cmake ninja ccache git go node npm codex \
+                       firefox rsync ssh python python2 python3 lz4 autoconf \
+                       libtoolize makeinfo pkg-config; do
+              command -v "$cmd" >/dev/null 2>&1 || { echo "missing: $cmd"; exit 1; }
+            done
+            test -x /usr/sbin/sshd || { echo "missing: sshd"; exit 1; }
+            echo "all expected tools present"
+          '
+
+      # The 2018 Fuchsia tree hardcodes "#!/usr/bin/python" and expects python2.
+      # Ubuntu 22.04 ships no bare "python", so this symlink is load-bearing.
+      - name: Verify /usr/bin/python resolves to python2
+        run: |
+          docker run --rm --entrypoint /bin/bash "$TEST_IMAGE" -c '
+            set -euo pipefail
+            test -L /usr/bin/python
+            readlink -f /usr/bin/python | grep -q "python2"
+            python -V 2>&1 | grep -q "^Python 2"
+            echo "python -> $(readlink -f /usr/bin/python)"
+          '
+
+      - name: Verify SSH daemon hardening
+        run: |
+          docker run --rm --entrypoint /bin/bash "$TEST_IMAGE" -c '
+            set -euo pipefail
+            grep -qE "^PasswordAuthentication no$"      /etc/ssh/sshd_config
+            grep -qE "^KbdInteractiveAuthentication no$" /etc/ssh/sshd_config
+            grep -qE "^PubkeyAuthentication yes$"       /etc/ssh/sshd_config
+            grep -qE "^PermitRootLogin no$"             /etc/ssh/sshd_config
+            grep -qE "^X11Forwarding yes$"              /etc/ssh/sshd_config
+            grep -qE "^AllowUsers fuchsia$"             /etc/ssh/sshd_config
+            # sshd -t needs host keys, which are intentionally absent from the
+            # image and minted per container by the entrypoint. Generate a
+            # throwaway set inside this disposable container so the config
+            # itself can still be syntax-checked.
+            ssh-keygen -A >/dev/null 2>&1
+            /usr/sbin/sshd -t -f /etc/ssh/sshd_config
+            echo "sshd configuration valid and hardened"
+          '
+
+      # Guards the fix that strips package-generated host keys at build time.
+      # If these ever reappear in the image, every published container shares
+      # one private host identity.
+      - name: Verify no SSH host keys are baked into the image
+        run: |
+          docker run --rm --entrypoint /bin/bash "$TEST_IMAGE" -c '
+            set -euo pipefail
+            if compgen -G "/etc/ssh/ssh_host_*" >/dev/null; then
+              echo "host keys must not be baked into the image:"
+              ls -l /etc/ssh/ssh_host_*
+              exit 1
+            fi
+            echo "no host keys baked into the image"
+          '
+
+      - name: Verify each container gets a unique SSH host key
+        run: |
+          set -euo pipefail
+          # The entrypoint's `ssh-keygen -A` writes "generating new host keys"
+          # to stdout, so match the fingerprint explicitly rather than by field.
+          fp() {
+            docker run --rm --entrypoint /usr/local/bin/docker-entrypoint.sh \
+              "$TEST_IMAGE" bash -c \
+              'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' \
+              | grep -oE 'SHA256:[A-Za-z0-9+/=]+' | tail -1
+          }
+          first="$(fp)"
+          second="$(fp)"
+          echo "container 1: $first"
+          echo "container 2: $second"
+          if [ "$first" = "$second" ]; then
+            echo "both containers share a host key; keys are not per-container"
+            exit 1
+          fi
+          echo "host keys are unique per container"
+
+      - name: Verify user, sudo, and environment
+        run: |
+          docker run --rm --entrypoint /bin/bash "$TEST_IMAGE" -c '
+            set -euo pipefail
+            [ "$(id -u fuchsia)" = "1000" ]
+            [ "$(id -g fuchsia)" = "1000" ]
+            test -f /etc/sudoers.d/fuchsia
+            test -x /usr/local/bin/docker-entrypoint.sh
+            [ "$FUCHSIA_DIR" = "/home/fuchsia/fuchsia" ]
+            [ "$CCACHE_DIR" = "/home/fuchsia/.cache/ccache" ]
+            [ "$LANG" = "en_US.UTF-8" ]
+            echo "user, sudo, and environment configured"
+          '
+
+      # End-to-end check of the documented workflow: mount a public key into
+      # /ssh, start the container, and log in over SSH the way fuchsia-ssh does.
+      - name: Test SSH login end to end
+        run: |
+          set -euo pipefail
+          ssh-keygen -t ed25519 -N '' -C ci -f "$RUNNER_TEMP/ci_key" -q
+          mkdir -p "$RUNNER_TEMP/sshdir"
+          install -m 644 "$RUNNER_TEMP/ci_key.pub" "$RUNNER_TEMP/sshdir/authorized_keys"
+
+          docker run -d --name fuchsia-ci --init \
+            -v "$RUNNER_TEMP/sshdir:/ssh:ro" \
+            -p "127.0.0.1:${SSH_PORT}:22" \
+            "$TEST_IMAGE"
+
+          ssh_opts=(-i "$RUNNER_TEMP/ci_key" -p "$SSH_PORT"
+                    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+                    -o BatchMode=yes -o ConnectTimeout=5 -o LogLevel=ERROR)
+
+          for _ in $(seq 1 45); do
+            if ssh "${ssh_opts[@]}" fuchsia@127.0.0.1 true 2>/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "${ready:-0}" != "1" ]; then
+            echo "SSH did not become ready in time"
+            docker logs fuchsia-ci
+            exit 1
+          fi
+
+          echo "--- account, directories, and sudo ---"
+          ssh "${ssh_opts[@]}" fuchsia@127.0.0.1 \
+            'set -eu; [ "$(whoami)" = fuchsia ]; test -d "$HOME/fuchsia"; \
+             test -d "$HOME/.cache/ccache"; test -d "$HOME/.ssh"; sudo -n true; \
+             echo "account and directories OK"'
+
+          # The exports live in ~/.bashrc below Ubuntu's "if not running
+          # interactively, don't do anything" guard, so they only apply to
+          # interactive shells -- which is what ./fuchsia-ssh opens. Force an
+          # interactive login shell (-lic) to assert what a real user sees.
+          echo "--- interactive login shell environment ---"
+          env_out="$(ssh "${ssh_opts[@]}" fuchsia@127.0.0.1 \
+            'bash -lic "printf %s\\\\n \"\$FUCHSIA_DIR\" \"\$CCACHE_DIR\" \"\$PATH\""' \
+            2>/dev/null | tr -d '\r')"
+          printf '%s\n' "$env_out"
+
+          echo "$env_out" | sed -n 1p | grep -qx "/home/fuchsia/fuchsia"
+          echo "$env_out" | sed -n 2p | grep -qx "/home/fuchsia/.cache/ccache"
+          echo "$env_out" | sed -n 3p | grep -q "\.jiri_root/bin"
+          echo "interactive login shell environment OK"
+
+          echo "--- password authentication must be refused ---"
+          if ssh -p "$SSH_PORT" -o StrictHostKeyChecking=no \
+                 -o UserKnownHostsFile=/dev/null -o BatchMode=yes \
+                 -o PubkeyAuthentication=no \
+                 -o PreferredAuthentications=password \
+                 -o ConnectTimeout=5 -o LogLevel=ERROR \
+                 fuchsia@127.0.0.1 true 2>/dev/null; then
+            echo "password authentication succeeded but must be disabled"
+            exit 1
+          fi
+          echo "password authentication correctly refused"
+
+      - name: Collect container logs on failure
+        if: failure()
+        run: docker logs fuchsia-ci || true
+
+      - name: Remove test container
+        if: always()
+        run: docker rm -f fuchsia-ci || true
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # Pull requests build and test but never publish: a fork's GITHUB_TOKEN
+      # has no packages:write permission, and untrusted code must not be tagged.
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image to GitHub Packages
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+
+      - name: Summarize published tags
+        if: github.event_name != 'pull_request'
+        run: |
+          {
+            echo "### Published to GitHub Packages"
+            echo
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
