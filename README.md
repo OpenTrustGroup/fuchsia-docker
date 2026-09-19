@@ -12,6 +12,8 @@ SSH is bound to localhost only and uses public-key authentication by default.
 - `docker-compose.yml`: Starts the development container and exposes SSH.
 - `docker-compose.kvm.yml`: Optional Compose override that passes `/dev/kvm`
   into the container.
+- `docker-compose.tun.yml`: Optional Compose override that passes `/dev/net/tun`
+  into the container and grants `CAP_NET_ADMIN`, for tap networking.
 - `docker-entrypoint.sh`: Installs SSH authorized keys at container startup.
 - `ssh/authorized_keys`: Local public keys mounted into the container. This file
   is ignored by Git.
@@ -107,6 +109,43 @@ docker compose -f docker-compose.yml -f docker-compose.kvm.yml up -d --build --f
 When `/dev/kvm` is mounted, the entrypoint adds the container user to a group
 matching the device's group ID before starting SSH. Open a new SSH session after
 recreating the container so the login has the updated group membership.
+
+Enable tap networking for the emulated target, which `fx run -N` needs, on hosts
+that expose `/dev/net/tun`:
+
+```bash
+test -e /dev/net/tun || sudo modprobe tun
+docker compose -f docker-compose.yml -f docker-compose.tun.yml up -d --build --force-recreate
+```
+
+Stack the overrides to get both KVM and tap networking:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.kvm.yml -f docker-compose.tun.yml up -d --build --force-recreate
+```
+
+The device cannot come from the image: Docker mounts a fresh `/dev` when the
+container starts, and its default device cgroup denies opening the tun device.
+The override passes the host's node through and adds `CAP_NET_ADMIN` so the
+container can configure interfaces; the entrypoint then makes the node readable
+and writable by the development user. `CAP_NET_ADMIN` is required even though
+the tap interface is created inside the container, because the container has its
+own network namespace and so cannot reuse one created on the host.
+
+In the nebula tree, `fx run-venus -n` then needs no further setup: it creates
+the `qemu-<n>` tap with `tunctl`, has QEMU run `scripts/start-dhcp-server.sh` as
+the interface's up script, and deletes the interface and the DHCP server again
+when it exits. It relies on passwordless `sudo`, which the image already grants
+the development user.
+
+The 2018 tree's `fx run -N` expects the interface to exist already, so create it
+by hand there:
+
+```bash
+sudo tunctl -u "$USER" -t qemu
+sudo ifconfig qemu up
+sudo "${FUCHSIA_DIR}/scripts/start-dhcp-server.sh" qemu
+```
 
 Run a command over SSH:
 

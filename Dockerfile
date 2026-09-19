@@ -103,6 +103,36 @@ RUN apt-get update \
         zstd \
     && rm -rf /var/lib/apt/lists/*
 
+# Helpers the emulator scripts shell out to. `fx run-venus -n` in the nebula
+# tree builds its own tap interface -- tunctl from uml-utilities, ifconfig from
+# net-tools, and dnsmasq run from scripts/start-dhcp-server.sh as the QEMU netdev
+# up script -- and tears it down again with tunctl and pgrep from procps. The
+# 2018 tree's `fx run -N` expects the same tools, but the interface has to be
+# created by hand. dnsmasq-base carries the binary that start-dhcp-server.sh
+# looks for, without the service package's init handling during the build.
+# run-venus also needs nc for its serial terminals and expect for the checked
+# runs behind `fx run-ci`; it prefers tmux (`-x`) over an X terminal, which is
+# the only workable choice in a container.
+#
+# The /dev/net/tun device node itself cannot be created in the image: Docker
+# mounts a fresh tmpfs over /dev when the container starts, hiding anything
+# baked in here, and the default device cgroup denies opening char 10:200 even
+# when mknod succeeds. The host must pass the device through -- see
+# docker-compose.tun.yml, which adds `devices:` and CAP_NET_ADMIN -- and the
+# entrypoint then grants the dev user access to it. CAP_NET_ADMIN is needed
+# whichever tree runs: the tap lives in the container's own network namespace,
+# so creating and configuring it happens inside the container.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        dnsmasq-base \
+        expect \
+        kmod \
+        net-tools \
+        netcat-openbsd \
+        procps \
+        uml-utilities \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://packages.mozilla.org/apt/repo-signing-key.gpg -o /etc/apt/keyrings/packages.mozilla.org.asc \
     && gpg -n -q --import --import-options import-show /etc/apt/keyrings/packages.mozilla.org.asc \

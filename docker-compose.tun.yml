@@ -1,0 +1,6 @@
+services:
+  fuchsia-dev:
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN

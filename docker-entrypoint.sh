@@ -27,9 +27,27 @@ configure_kvm_group() {
     usermod -aG "${kvm_group}" "${USERNAME}"
 }
 
+configure_tun_access() {
+    # The image cannot ship /dev/net/tun, because Docker mounts a fresh /dev
+    # over it at start. Create the node here when it was not passed in, which
+    # succeeds only with CAP_MKNOD, and make it accessible to the dev user the
+    # way a Linux host presents it. Opening it still requires the device cgroup
+    # to allow char 10:200, so keep every step non-fatal: a container without
+    # tun support must still start, just without tap networking.
+    if [[ ! -e /dev/net/tun ]]; then
+        mkdir -p /dev/net
+        mknod /dev/net/tun c 10 200 2> /dev/null || true
+    fi
+
+    if [[ -e /dev/net/tun ]]; then
+        chmod 0666 /dev/net/tun 2> /dev/null || true
+    fi
+}
+
 mkdir -p /run/sshd "${HOME_DIR}/.ssh" "${HOME_DIR}/fuchsia" "${HOME_DIR}/.cache/ccache"
 chmod 700 "${HOME_DIR}/.ssh"
 configure_kvm_group
+configure_tun_access
 
 for file in .bashrc .profile .bash_logout; do
     if [[ ! -e "${HOME_DIR}/${file}" && -e "/etc/skel/${file}" ]]; then
