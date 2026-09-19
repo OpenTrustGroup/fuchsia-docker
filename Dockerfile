@@ -67,6 +67,42 @@ RUN apt-get update \
 # build capability the CI agent has.
 RUN ln -sf /usr/bin/python2 /usr/bin/python
 
+# Host packages the nebula tree needs on top of the list above, so `fx
+# full-build` completes there. Each one fixes a failure that otherwise appears
+# late and far from its cause:
+#   - openjdk-11-jdk-headless, ant: build/bootfs/BUILD.gn hardcodes
+#     script = "/usr/bin/java" for the bootdata_license template, and the jar it
+#     runs is built from third_party/nbl_license_tool/build.xml with Ant.
+#   - bc, cpio, flex, bison, libssl-dev: the REE Linux kernel build. Missing bc
+#     and cpio surface only as "Error 127" from timeconst.h and gen_kheaders.sh.
+#   - zstd: image compression (lz4 comes from the list above).
+#   - gcc-aarch64-linux-gnu: the syzkaller cross build.
+#   - libpixman-1-dev, libslirp-dev, libcap-ng-dev, libzstd-dev, libaio-dev: the
+#     in-tree QEMU meson genrule, which otherwise reports just "ERROR: meson
+#     setup failed" and leaves the real diagnostic in the meson log
+#     (libglib2.0-dev and ninja-build come from the list above).
+# The tree's own Linaro toolchain must still precede /usr/bin on PATH, which
+# `source scripts/env.sh` arranges: dropbear's configure searches PATH for
+# aarch64-linux-gnu-gcc, and the distro cross compiler installed here fails its
+# crypt() check because the host has no arm64 libcrypt.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ant \
+        bc \
+        bison \
+        cpio \
+        flex \
+        gcc-aarch64-linux-gnu \
+        libaio-dev \
+        libcap-ng-dev \
+        libpixman-1-dev \
+        libslirp-dev \
+        libssl-dev \
+        libzstd-dev \
+        openjdk-11-jdk-headless \
+        zstd \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://packages.mozilla.org/apt/repo-signing-key.gpg -o /etc/apt/keyrings/packages.mozilla.org.asc \
     && gpg -n -q --import --import-options import-show /etc/apt/keyrings/packages.mozilla.org.asc \
