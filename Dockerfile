@@ -26,6 +26,7 @@ RUN apt-get update \
         file \
         g++ \
         git \
+        gitk \
         gnupg \
         golang \
         iproute2 \
@@ -45,13 +46,16 @@ RUN apt-get update \
         pkg-config \
         python2 \
         python3 \
+        python3-pip \
         python3-venv \
         rsync \
+        silversearcher-ag \
         sudo \
         texinfo \
         tmux \
         unzip \
         vim \
+        wget \
         xauth \
         xz-utils \
         zip \
@@ -131,6 +135,46 @@ RUN apt-get update \
         netcat-openbsd \
         procps \
         uml-utilities \
+    && rm -rf /var/lib/apt/lists/*
+
+# Host tools the MediaTek mt8668 BSP's Yocto build needs beyond what poky's own
+# sanity check reports. rpm is here for rpm2cpio: libneuron_9.0.bb:do_compile
+# unpacks a prebuilt .rpm, and without it the build fails some ten thousand
+# tasks in, with the real error -- "/usr/bin/rpm2cpio: not found" -- buried
+# above a wall of `install: cannot stat` fallout. lib32z1 is the 32-bit zlib
+# runtime, which some of the BSP's vendor-supplied prebuilt host binaries are
+# linked against; it is packaged for amd64, so it needs no i386 foreign
+# architecture. The rest are ordinary bitbake host dependencies; texinfo
+# already comes from the base list above.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        chrpath \
+        diffstat \
+        gawk \
+        lib32z1 \
+        python3-git \
+        python3-jinja2 \
+        python3-pexpect \
+        python3-subunit \
+        rpm \
+        socat \
+    && rm -rf /var/lib/apt/lists/*
+
+# Tools for inspecting a target rather than building one. lldb reads the
+# on-device minidumps that gdb and the 2018 tree's zxdb cannot;
+# device-tree-compiler builds and dumps the mt8668 BSP's device trees; and
+# binutils-aarch64-linux-gnu supplies objdump, readelf and nm for arm64 images
+# when the tree's own toolchain is not on PATH. libncurses5, its headers, and
+# libpython2.7 were installed for the same bring-up -- note that the python2
+# package above ships the interpreter without the shared library.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        binutils-aarch64-linux-gnu \
+        device-tree-compiler \
+        libncurses5 \
+        libncurses5-dev \
+        libpython2.7 \
+        lldb \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /etc/apt/keyrings \
