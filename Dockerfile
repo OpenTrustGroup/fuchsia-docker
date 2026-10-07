@@ -107,6 +107,13 @@ RUN apt-get update \
         zstd \
     && rm -rf /var/lib/apt/lists/*
 
+# Python modules the nebula build imports that no distribution package
+# provides. zircon/scripts/demangle_nm.py imports cxxfilt to build the kernel's
+# symbol table; developer hosts had it from an unrecorded `pip install --user`,
+# so the first CI build of the tree -- on an image without it -- stopped at
+# "No module named 'cxxfilt'". Pinned, as the build expects this API.
+RUN pip3 install --no-cache-dir cxxfilt==0.3.0
+
 # Helpers the emulator scripts shell out to. `fx run-venus -n` in the nebula
 # tree builds its own tap interface -- tunctl from uml-utilities, ifconfig from
 # net-tools, and dnsmasq run from scripts/start-dhcp-server.sh as the QEMU netdev
@@ -162,7 +169,9 @@ RUN apt-get update \
 
 # Tools for inspecting a target rather than building one. lldb reads the
 # on-device minidumps that gdb and the 2018 tree's zxdb cannot;
-# device-tree-compiler builds and dumps the mt8668 BSP's device trees; and
+# device-tree-compiler builds and dumps the mt8668 BSP's device trees -- and is
+# also a nebula build dependency, not only a tool: garnet compiles
+# build/bootfs/features-venus-ci.dts with /usr/bin/dtc; and
 # binutils-aarch64-linux-gnu supplies objdump, readelf and nm for arm64 images
 # when the tree's own toolchain is not on PATH. libncurses5, its headers, and
 # libpython2.7 were installed for the same bring-up -- note that the python2
