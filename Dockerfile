@@ -13,7 +13,11 @@ ARG NODE_MAJOR=22
 # -- from the OTGOS build.md validated-host list) so this image can also build the
 # 2018 tree. libsdl-dev is virtual, hence libsdl1.2-dev; python2 (2.7.18) is
 # required by the 2018 build helpers. lz4 supersedes the doc's retired liblz4-tool.
+# The upgrade pulls in security fixes published since the ubuntu:22.04 base was
+# cut -- without it the base's own packages (sudo, libarchive13, ...) stay at
+# whatever version that snapshot shipped and Trivy reports them as fixable.
 RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends \
         autoconf \
         bash-completion \
@@ -196,12 +200,20 @@ RUN mkdir -p /etc/apt/keyrings \
     && apt-get install -y --no-install-recommends firefox \
     && rm -rf /var/lib/apt/lists/*
 
+# nodesource ships each Node release with the npm it was cut with, and that
+# npm's bundled dependencies (pacote, sigstore, brace-expansion, ip-address, ...)
+# carry fixable CVEs long before the next Node release replaces them. Upgrading
+# npm itself is the only way to update them; npm 12 needs node >= 22.22.2.
+# npm 12 runs install scripts only for packages on --allow-scripts, and Claude
+# Code's postinstall is what fetches its native binary -- without the allowance
+# the install succeeds but `claude` fails with "native binary not installed".
 RUN mkdir -p /etc/apt/keyrings \
     && curl -fsSL "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key" | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
     && printf 'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_%s.x nodistro main\n' "${NODE_MAJOR}" > /etc/apt/sources.list.d/nodesource.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g @openai/codex @anthropic-ai/claude-code \
+    && npm install -g npm@12 \
+    && npm install -g --allow-scripts=@anthropic-ai/claude-code @openai/codex @anthropic-ai/claude-code \
     && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
 
