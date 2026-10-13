@@ -20,7 +20,7 @@ SSH is bound to localhost only and uses public-key authentication by default.
 - `keys/`: Optional local client key storage. This directory is ignored by Git.
 - `fuchsia-home/`: Local home directory for the container's `fuchsia` user.
   This directory is ignored by Git and contains the Fuchsia checkout, compiler
-  cache, shell history, Codex state, and other account files.
+  cache, shell history, Codex and Claude Code state, and other account files.
 
 ## Build And Start
 
@@ -177,6 +177,18 @@ You can also store an API key login with:
 ```bash
 printenv OPENAI_API_KEY | codex login --with-api-key
 ```
+
+Claude Code is installed in the image as well and available as `claude`.
+Start it once over SSH and follow the login prompt:
+
+```bash
+claude
+```
+
+Its settings and login live in `~/.claude` and `~/.claude.json`, so they
+persist with the rest of the home directory. A copy installed earlier with
+the native installer, at `~/.local/bin/claude`, comes first on `PATH` and
+shadows the image's copy; remove it to use the one in the image.
 
 ## Configuration
 
