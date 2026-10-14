@@ -200,6 +200,24 @@ RUN mkdir -p /etc/apt/keyrings \
     && apt-get install -y --no-install-recommends firefox \
     && rm -rf /var/lib/apt/lists/*
 
+# X2Go remote desktop over the existing SSH port, with XFCE as the session --
+# X2Go cannot drive GNOME's compositor, and XFCE is the desktop it fully
+# supports. The x2go/stable PPA is the install path the X2Go wiki gives for
+# Ubuntu and carries 4.1.0.6 for jammy, ahead of the 4.1.0.3 in universe.
+# The entrypoint starts x2gocleansessions, since the container has no systemd.
+RUN mkdir -p /etc/apt/keyrings \
+    && curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xDE8A37E3797E53D6625FF9E1EA40B3B3C0B1202D" -o /etc/apt/keyrings/x2go.asc \
+    && gpg -n -q --import --import-options import-show /etc/apt/keyrings/x2go.asc \
+        | awk 'BEGIN { found = 0 } /pub/ { getline; gsub(/^ +| +$/, ""); if ($0 == "DE8A37E3797E53D6625FF9E1EA40B3B3C0B1202D") found = 1 } END { exit found ? 0 : 1 }' \
+    && printf 'deb [signed-by=/etc/apt/keyrings/x2go.asc] https://ppa.launchpadcontent.net/x2go/stable/ubuntu jammy main\n' > /etc/apt/sources.list.d/x2go.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        x2goserver \
+        x2goserver-xsession \
+        xfce4 \
+        xfce4-terminal \
+    && rm -rf /var/lib/apt/lists/*
+
 # nodesource ships each Node release with the npm it was cut with, and that
 # npm's bundled dependencies (pacote, sigstore, brace-expansion, ip-address, ...)
 # carry fixable CVEs long before the next Node release replaces them. Upgrading

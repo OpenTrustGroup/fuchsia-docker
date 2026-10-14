@@ -84,4 +84,10 @@ fi
 chown "${USERNAME}:${USERNAME}" "${HOME_DIR}" "${HOME_DIR}/.ssh" "${HOME_DIR}/fuchsia" "${HOME_DIR}/.cache" "${HOME_DIR}/.cache/ccache" "${HOME_DIR}/.bashrc"
 ssh-keygen -A
 
+# X2Go's session janitor normally runs under systemd; without it, sessions
+# that end uncleanly are never reaped and their displays stay allocated.
+if command -v x2gocleansessions > /dev/null; then
+    x2gocleansessions || true
+fi
+
 exec "$@"

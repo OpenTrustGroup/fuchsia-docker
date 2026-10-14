@@ -14,7 +14,8 @@ SSH is bound to localhost only and uses public-key authentication by default.
   into the container.
 - `docker-compose.tun.yml`: Optional Compose override that passes `/dev/net/tun`
   into the container and grants `CAP_NET_ADMIN`, for tap networking.
-- `docker-entrypoint.sh`: Installs SSH authorized keys at container startup.
+- `docker-entrypoint.sh`: Installs SSH authorized keys and starts the X2Go
+  session cleaner at container startup.
 - `ssh/authorized_keys`: Local public keys mounted into the container. This file
   is ignored by Git.
 - `keys/`: Optional local client key storage. This directory is ignored by Git.
@@ -189,6 +190,27 @@ Its settings and login live in `~/.claude` and `~/.claude.json`, so they
 persist with the rest of the home directory. A copy installed earlier with
 the native installer, at `~/.local/bin/claude`, comes first on `PATH` and
 shadows the image's copy; remove it to use the one in the image.
+
+## Remote Desktop (X2Go)
+
+The image includes an X2Go server with an XFCE desktop. X2Go runs over SSH,
+so it needs no extra port: point an X2Go client at the container's SSH port.
+
+| Setting | Value |
+| --- | --- |
+| Host | `127.0.0.1` |
+| Login | `fuchsia` |
+| SSH port | `2222` (or `SSH_PORT`) |
+| Session type | `XFCE` |
+| Authentication | the private key matching `authorized_keys` |
+
+Use an RSA or ECDSA key if your client is PyHoca (`pyhoca-cli`,
+`pyhoca-gui`): its python-x2go library cannot load ed25519 keys and falls
+back to a password prompt. The X2Go Client (`x2goclient`) accepts ed25519.
+
+To reach the desktop from another machine, forward the SSH port rather than
+publishing it, for example `ssh -L 2222:127.0.0.1:2222 <docker-host>`, and
+connect the client to `localhost:2222`.
 
 ## Configuration
 
